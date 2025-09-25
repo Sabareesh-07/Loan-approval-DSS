@@ -1,8 +1,4 @@
-# train_model.py
-"""
-Train pipeline for Loan Approval DSS using Logistic Regression.
-Outputs: loan_pipeline.pkl (saved sklearn Pipeline) and feature_coefs.csv
-"""
+#pipeline for Loan Approval DSS using Logistic Regression
 
 import pandas as pd
 import numpy as np
@@ -17,10 +13,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, accuracy_score
 
-# ---------- CONFIG ----------
-DATA_PATH = "dataset1.csv"   # <-- change filename if your CSV is named differently
-SAVE_PIPELINE_PATH = "loan_pipeline.pkl"
-SAVE_COEFS_PATH = "feature_coefs.csv"
+
+DATA_PATH = "dataset1.csv"
+PIPELINE_PATH = "loan_pipeline.pkl"
+COEFS_PATH = "feature_coefs.csv"
 RANDOM_STATE = 42
 
 # ---------- HELPERS ----------
@@ -131,8 +127,8 @@ except Exception:
 print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
 
 # ---------- SAVE PIPELINE ----------
-joblib.dump(pipeline, SAVE_PIPELINE_PATH)
-print(f"\nSaved pipeline to {SAVE_PIPELINE_PATH}")
+joblib.dump(pipeline, PIPELINE_PATH)
+print(f"\nSaved pipeline to {PIPELINE_PATH}")
 
 # ---------- EXTRACT FEATURE NAMES & COEFFICIENTS ----------
 def get_feature_names_from_preprocessor(preprocessor):
@@ -157,8 +153,8 @@ try:
     if len(feature_names) == len(coefs):
         coef_df = pd.DataFrame({"feature": feature_names, "coef": coefs})
         coef_df = coef_df.reindex(coef_df.coef.abs().sort_values(ascending=False).index)
-        coef_df.to_csv(SAVE_COEFS_PATH, index=False)
-        print(f"Saved feature coefficients to {SAVE_COEFS_PATH}")
+        coef_df.to_csv(COEFS_PATH, index=False)
+        print(f"Saved feature coefficients to {COEFS_PATH}")
     else:
         print("Warning: feature name count doesn't match coefficient count. Skipping saving coefs.")
 except Exception as e:

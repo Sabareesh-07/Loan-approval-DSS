@@ -125,7 +125,7 @@ if st.button("Predict Approval"):
         st.error(f"Model prediction failed: {e}")
         raise
 
-    decision = "APPROVE" if proba >= THRESHOLD else "REJECT"
+    decision = "APPROVE" if pred == 1 else "REJECT"
     st.markdown(f"### Decision: **{decision}**")
     st.markdown(f"### Approval Probability: **{proba*100:.1f}%**")
 
@@ -149,6 +149,3 @@ if st.button("Predict Approval"):
             st.write("No strong negative contributors detected.")
     else:
         st.write("Detailed contribution explanation not available (preprocessor feature names unavailable).")
-
-    st.info("Note: This model is trained on historical dataset snapshots. Use recommendations as support, not as an absolute decision.")
-
