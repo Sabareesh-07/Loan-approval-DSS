@@ -8,6 +8,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import shap
 
 # ---------- CONFIG ----------
 PIPELINE_PATH = "loan_pipeline.pkl"   # should match training output
@@ -33,22 +34,51 @@ def get_feature_names_from_preprocessor(preprocessor, numeric_features, categori
 
 def explain_contributions(pipeline, X_df, numeric_features, categorical_features):
     """
-    Returns a DataFrame of feature contributions for the single input row in X_df.
-    Contribution = coef * transformed_feature_value
-    This uses the pipeline's preprocessor and logistic regression coefficients.
+    Returns per-feature contributions using SHAP for tree-based models.
+    Falls back to feature_importances_ if SHAP fails.
+    Always includes a 'type' column.
     """
-    pre = pipeline.named_steps['preprocessor']
-    clf = pipeline.named_steps['clf']
-    X_trans = pre.transform(X_df)   # 2D array
-    coefs = clf.coef_[0]
+    import shap
+    pre = pipeline.named_steps["preprocessor"]
+    clf = pipeline.named_steps["clf"]
+
     try:
-        feature_names = get_feature_names_from_preprocessor(pre, numeric_features, categorical_features)
-        contrib = X_trans[0] * coefs
-        contrib_df = pd.DataFrame({"feature": feature_names, "contribution": contrib})
-        contrib_df = contrib_df.sort_values("contribution", ascending=False)
+        # Preprocess applicant
+        X_trans = pre.transform(X_df)
+        feature_names = pre.get_feature_names_out()
+
+        # SHAP for tree-based model
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_trans)
+
+        # Get shap values for class 1 (Approved)
+        if isinstance(shap_values, list):
+            shap_contrib = shap_values[1][0]
+        else:
+            shap_contrib = shap_values[0]
+
+        contrib_df = pd.DataFrame({
+            "feature": feature_names,
+            "contribution": shap_contrib
+        }).sort_values("contribution", ascending=False)
+        contrib_df["type"] = "shap"
         return contrib_df
-    except Exception:
-        return None
+
+    except Exception as e:
+        # Fallback: feature importances
+        if hasattr(clf, "feature_importances_"):
+            feature_names = pre.get_feature_names_out()
+            contrib_df = pd.DataFrame({
+                "feature": feature_names,
+                "importance": clf.feature_importances_
+            }).sort_values("importance", ascending=False)
+            contrib_df["type"] = "tree"
+            return contrib_df
+
+        else:
+            st.warning(f"Explanation unavailable: {e}")
+            return None
+
 
 # ---------- APP ----------
 st.set_page_config(page_title="Loan Approval DSS", layout="centered")
@@ -85,8 +115,8 @@ luxury_assets_value = st.number_input("Luxury assets value (INR)", min_value=0.0
 bank_asset_value = st.number_input("Bank asset value (savings) (INR)", min_value=0.0, value=50000.0, step=1000.0)
 
 # categorical inputs
-education = st.selectbox("Education", options=["Graduate", "Not Graduate", "Unknown"])
-self_employed = st.selectbox("Self Employed", options=["No", "Yes", "Unknown"])
+education = st.selectbox("Education", options=["Graduate", "Not Graduate"])
+self_employed = st.selectbox("Self Employed", options=["No", "Yes"])
 
 # when user clicks Predict
 if st.button("Predict Approval"):
@@ -131,21 +161,32 @@ if st.button("Predict Approval"):
 
     # explanation via linear contribution
     contrib_df = explain_contributions(pipeline, X_input, numeric_features, categorical_features)
-    if contrib_df is not None:
-        st.subheader("Top positive contributors (increase approval probability)")
-        pos = contrib_df[contrib_df["contribution"] > 0].head(5)
-        if not pos.empty:
-            for _, row in pos.iterrows():
-                st.write(f"- **{row['feature']}** : contribution {row['contribution']:.3f}")
-        else:
-            st.write("No strong positive contributors detected.")
 
-        st.subheader("Top negative contributors (decrease approval probability)")
-        neg = contrib_df[contrib_df["contribution"] < 0].head(5)
-        if not neg.empty:
+    if contrib_df is not None and "type" in contrib_df.columns:
+        exp_type = contrib_df["type"].iloc[0]
+
+        if exp_type == "shap":
+            st.subheader("Feature impact on this applicant's approval probability")
+            pos = contrib_df[contrib_df["contribution"] > 0].head(5)
+            neg = contrib_df[contrib_df["contribution"] < 0].tail(5)
+
+            st.markdown("**Positive influences (increase approval):**")
+            for _, row in pos.iterrows():
+                st.write(f"- **{row['feature']}** : +{row['contribution']:.3f}")
+
+            st.markdown("**Negative influences (decrease approval):**")
             for _, row in neg.iterrows():
-                st.write(f"- **{row['feature']}** : contribution {row['contribution']:.3f}")
-        else:
-            st.write("No strong negative contributors detected.")
+                st.write(f"- **{row['feature']}** : {row['contribution']:.3f}")
+
+            st.bar_chart(contrib_df.set_index("feature")["contribution"])
+
+        elif exp_type == "tree":
+            st.subheader("Top influential features (model-level importance)")
+            top_feats = contrib_df.head(5)
+
+            #  Display the list of features and their importance values
+            for _, row in top_feats.iterrows():
+                st.write(f"- **{row['feature']}** : importance {row['importance']:.3f}")
+
     else:
-        st.write("Detailed contribution explanation not available (preprocessor feature names unavailable).")
+        st.write("No explanation available for this model.")
