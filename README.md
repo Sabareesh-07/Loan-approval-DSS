@@ -25,12 +25,12 @@ The system helps financial institutions assess loan applications efficiently whi
 
 ## 🧩 Features
 
-✅ Machine Learning model trained on real-world loan data  
-✅ Computes applicant-based approval probability  
-✅ Displays the **top influential factors** affecting each decision  
-✅ Uses **Random Forest Classifier** for non-linear decision boundaries  
-✅ Integrated **SHAP explanations** for model interpretability  
-✅ Clean and responsive **Streamlit interface**  
+- Machine Learning model trained on real-world loan data  
+- Computes applicant-based approval probability  
+- Displays the **top influential factors** affecting each decision  
+- Uses **Random Forest Classifier** for non-linear decision boundaries  
+- Integrated **SHAP explanations** for model interpretability  
+- Clean and responsive **Streamlit interface**  
 
 ---
 
