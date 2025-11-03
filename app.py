@@ -132,6 +132,21 @@ def explain_contributions(pipeline, X_df, numeric_features, categorical_features
 
 # ---------- APP ----------
 st.set_page_config(page_title="Loan Approval DSS", layout="centered")
+
+# Custom CSS for background color and button styling
+st.markdown("""
+    <style>
+        .stButton>button {
+            background-color: #ff4d4d;
+            color: white;
+        }
+        .stButton>button:hover {
+            background-color: #ff3333;
+            color: white;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("Loan Approval Decision Support System")
 st.write("Enter applicant details and get approval probability, decision and top reasons.")
 
