@@ -186,7 +186,7 @@ if st.button("Predict Approval"):
 
             #  Display the list of features and their importance values
             for _, row in top_feats.iterrows():
-                st.write(f"- **{row['feature']}** : importance {row['importance']:.3f}")
+                st.write(f"- **{row['feature']}** :  {row['importance']:.3f}")
 
     else:
         st.write("No explanation available for this model.")
