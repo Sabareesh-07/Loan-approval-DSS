@@ -11,15 +11,65 @@ import joblib
 import shap
 
 # ---------- CONFIG ----------
-PIPELINE_PATH = "loan_pipeline.pkl"   # should match training output
+MODEL_PATH = "best_model_pipeline.pkl"
 THRESHOLD = 0.5   # probability threshold for approve
 
+# Load model name and metrics
+try:
+    with open("best_model_info.txt", "r") as f:
+        model_info = f.read()
+except:
+    model_info = "Model information not available"
+
 # ---------- UTILS ----------
-def load_pipeline(path=PIPELINE_PATH):
-    return joblib.load(path)
+def load_pipeline():
+    return joblib.load(MODEL_PATH)
 
 def prettify_label(s):
     return s.replace("_", " ").title()
+
+def get_feature_importance(pipeline, X_df, model_type=None):
+    """Get feature importance based on model type and specific input"""
+    pre = pipeline.named_steps["preprocessor"]
+    clf = pipeline.named_steps["clf"]
+    feature_names = pre.get_feature_names_out()
+    X_transformed = pre.transform(X_df)
+    
+    # Convert sparse matrix to dense if needed
+    X_transformed = X_transformed.toarray() if hasattr(X_transformed, 'toarray') else X_transformed
+    
+    # Use SHAP for feature importance (works for both RF and XGBoost)
+    try:
+        import shap
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_transformed)
+        
+        # Get SHAP values for class 1 (Approved)
+        if isinstance(shap_values, list):
+            feature_importance = np.abs(shap_values[1][0])  # Take absolute values for importance
+            contribution = shap_values[1][0]
+        else:
+            feature_importance = np.abs(shap_values[0])
+            contribution = shap_values[0]
+            
+        return pd.DataFrame({
+            'feature': feature_names,
+            'importance': feature_importance,
+            'contribution': contribution
+        }).sort_values('importance', ascending=False)
+        
+    except Exception as e:
+        # Fallback to traditional feature importance if SHAP fails
+        if hasattr(clf, 'feature_importances_'):
+            importance = clf.feature_importances_
+            return pd.DataFrame({
+                'feature': feature_names,
+                'importance': importance
+            }).sort_values('importance', ascending=False)
+        else:
+            return None
+    
+    return None
 
 def get_feature_names_from_preprocessor(preprocessor, numeric_features, categorical_features):
     num_names = numeric_features
@@ -85,8 +135,12 @@ st.set_page_config(page_title="Loan Approval DSS", layout="centered")
 st.title("Loan Approval Decision Support System")
 st.write("Enter applicant details and get approval probability, decision and top reasons.")
 
+# Display model info
+st.markdown("### Model Information")
+st.text(model_info)
+
 # Load pipeline
-pipeline = load_pipeline(PIPELINE_PATH)
+pipeline = load_pipeline()
 
 # Attempt to detect which features were used during training
 # We rely on the same feature lists used in training script.
@@ -159,34 +213,24 @@ if st.button("Predict Approval"):
     st.markdown(f"### Decision: **{decision}**")
     st.markdown(f"### Approval Probability: **{proba*100:.1f}%**")
 
-    # explanation via linear contribution
-    contrib_df = explain_contributions(pipeline, X_input, numeric_features, categorical_features)
-
-    if contrib_df is not None and "type" in contrib_df.columns:
-        exp_type = contrib_df["type"].iloc[0]
-
-        if exp_type == "shap":
-            st.subheader("Feature impact on this applicant's approval probability")
-            pos = contrib_df[contrib_df["contribution"] > 0].head(5)
-            neg = contrib_df[contrib_df["contribution"] < 0].tail(5)
-
-            st.markdown("**Positive influences (increase approval):**")
-            for _, row in pos.iterrows():
-                st.write(f"- **{row['feature']}** : +{row['contribution']:.3f}")
-
-            st.markdown("**Negative influences (decrease approval):**")
-            for _, row in neg.iterrows():
-                st.write(f"- **{row['feature']}** : {row['contribution']:.3f}")
-
-            st.bar_chart(contrib_df.set_index("feature")["contribution"])
-
-        elif exp_type == "tree":
-            st.subheader("Top influential features (model-level importance)")
-            top_feats = contrib_df.head(5)
-
-            #  Display the list of features and their importance values
-            for _, row in top_feats.iterrows():
-                st.write(f"- **{row['feature']}** :  {row['importance']:.3f}")
-
-    else:
-        st.write("No explanation available for this model.")
+    # Get feature importance
+    importance_df = get_feature_importance(pipeline, X_input)
+    
+    if importance_df is not None:
+        st.subheader("Feature Importance Analysis")
+        
+        # Display top 10 most important features
+        top_features = importance_df.head(10)
+        
+        # Create a bar chart
+        st.bar_chart(top_features.set_index("feature")["importance"])
+        
+        # List the top features with their importance values and contributions
+        st.markdown("**Top influential features for this prediction:**")
+        for _, row in top_features.iterrows():
+            feature_name = prettify_label(row['feature'])
+            importance = row['importance']
+            
+            st.markdown(
+                f"- **{feature_name}** :     {importance:.4f}"
+            )

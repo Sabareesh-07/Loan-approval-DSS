@@ -1,4 +1,4 @@
-# pipeline for Loan Approval DSS using Logistic Regression (fixed version)
+# pipeline for Loan Approval DSS
 
 import pandas as pd
 import numpy as np
@@ -7,12 +7,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, accuracy_score
 
 DATA_PATH = "dataset1.csv"
-PIPELINE_PATH = "loan_pipeline.pkl"
-COEFS_PATH = "feature_coefs.csv"
 RANDOM_STATE = 42
 
 def map_status_to_binary(s):
@@ -55,20 +52,45 @@ preprocessor = ColumnTransformer([
     ("cat", categorical_transformer, categorical_features),
 ])
 
-# ---------- MODEL ----------
+# ---------- MODELS ----------
 from sklearn.ensemble import RandomForestClassifier
+import xgboost as xgb
 
-clf = RandomForestClassifier(
+# Initialize models
+rf_clf = RandomForestClassifier(
     n_estimators=300,
     max_depth=None,
     random_state=42,
     class_weight="balanced",
 )
 
-pipeline = Pipeline(steps=[
+# Calculate class weight for XGBoost
+neg_pos_ratio = len(df[df['__target__'] == 0]) / len(df[df['__target__'] == 1])
+
+xgb_clf = xgb.XGBClassifier(
+    n_estimators=200,
+    max_depth=6,
+    learning_rate=0.1,
+    random_state=42,
+    scale_pos_weight=neg_pos_ratio  # Handle class imbalance
+)
+
+# Create pipelines for both models
+rf_pipeline = Pipeline(steps=[
     ("preprocessor", preprocessor),
-    ("clf", clf),
+    ("clf", rf_clf),
 ])
+
+xgb_pipeline = Pipeline(steps=[
+    ("preprocessor", preprocessor),
+    ("clf", xgb_clf),
+])
+
+# Dictionary to store all models and their results
+models = {
+    "Random Forest": rf_pipeline,
+    "XGBoost": xgb_pipeline
+}
 
 # ---------- SPLIT ----------
 X = df[numeric_features + categorical_features]
@@ -77,28 +99,86 @@ X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
 )
 
-# ---------- TRAIN ----------
-pipeline.fit(X_train, y_train)
-print("\nRandom Forest model trained.")
+# ---------- TRAIN AND EVALUATE MODELS ----------
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
 
-# ---------- EVALUATION ----------
-y_pred = pipeline.predict(X_test)
-y_prob = pipeline.predict_proba(X_test)[:, 1]
+# Function to evaluate a model
+def evaluate_model(pipeline, X_test, y_test, model_name):
+    y_pred = pipeline.predict(X_test)
+    y_prob = pipeline.predict_proba(X_test)[:, 1]
+    
+    print(f"\n{model_name} Results:")
+    print("Classification Report:\n", classification_report(y_test, y_pred, digits=4))
+    print("Accuracy:", accuracy_score(y_test, y_pred))
+    print("ROC AUC:", roc_auc_score(y_test, y_prob))
+    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+    
+    mean_prob = np.mean(y_prob)
+    print(f"\nMean predicted probability (Approved class): {mean_prob:.4f}")
+    if mean_prob < 0.05 or mean_prob > 0.95:
+        print("⚠️ Warning: Model outputs extremely confident probabilities")
+    
+    # Calculate ROC curve
+    fpr, tpr, _ = roc_curve(y_test, y_prob)
+    roc_auc = auc(fpr, tpr)
+    
+    return {
+        "y_pred": y_pred,
+        "y_prob": y_prob,
+        "accuracy": accuracy_score(y_test, y_pred),
+        "auc": roc_auc,
+        "fpr": fpr,
+        "tpr": tpr
+    }
 
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, accuracy_score
-print("\nClassification Report:\n", classification_report(y_test, y_pred, digits=4))
-print("Accuracy:", accuracy_score(y_test, y_pred))
-print("ROC AUC:", roc_auc_score(y_test, y_prob))
-print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+# Dictionary to store results
+results = {}
 
-import numpy as np
-print("\nMean predicted probability (Approved class):", np.mean(y_prob))
+# Train and evaluate all models
+plt.figure(figsize=(10, 8))
+for model_name, pipeline in models.items():
+    print(f"\nTraining {model_name}...")
+    pipeline.fit(X_train, y_train)
+    eval_results = evaluate_model(pipeline, X_test, y_test, model_name)
+    results[model_name] = eval_results
+    
+    # Plot ROC curve for this model
+    plt.plot(
+        eval_results["fpr"], 
+        eval_results["tpr"], 
+        label=f'{model_name} (AUC = {eval_results["auc"]:.4f})'
+    )
 
-# Debug probability sanity
-print("\nMean predicted probability (Approved class):", np.mean(y_prob))
-if np.mean(y_prob) < 0.05 or np.mean(y_prob) > 0.95:
-    print("⚠️ Warning: Model outputs extremely confident probabilities — consider scaling or nonlinear model.")
+# Finish ROC plot
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curves for All Models')
+plt.legend(loc="lower right")
+plt.grid(True)
+plt.savefig('roc_curves.png')
+plt.close()
+
+# Compare models
+print("\nModel Comparison:")
+print(f"{'Model':<20} {'Accuracy':<10} {'ROC AUC':<10}")
+print("-" * 40)
+for model_name, metrics in results.items():
+    print(f"{model_name:<20} {metrics['accuracy']:.4f}    {metrics['auc']:.4f}")
+
+# Find best model based on ROC AUC
+best_model_name = max(results.items(), key=lambda x: x[1]['auc'])[0]
+best_pipeline = models[best_model_name]
+print(f"\nBest performing model: {best_model_name} (ROC AUC: {results[best_model_name]['auc']:.4f})")
 
 # ---------- SAVE ----------
-joblib.dump(pipeline, PIPELINE_PATH)
-print(f"\nSaved pipeline to {PIPELINE_PATH}")
+# Save only the best model
+print(f"\nSaving best model ({best_model_name})...")
+joblib.dump(best_pipeline, "best_model_pipeline.pkl")
+with open("best_model_info.txt", "w") as f:
+    f.write(f"Best Model: {best_model_name}\n")
+    f.write(f"Accuracy: {results[best_model_name]['accuracy']:.4f}\n")
+    f.write(f"ROC AUC: {results[best_model_name]['auc']:.4f}\n")
